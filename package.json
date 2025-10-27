@@ -11,7 +11,10 @@
   "dependencies": {
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "next": "16.0.0"
+    "next": "16.0.0",
+    "ibm_db": "^3.2.4",
+    "react-syntax-highlighter": "^15.5.0",
+    "react-simple-code-editor": "^0.13.1"
   },
   "devDependencies": {
     "typescript": "^5",
