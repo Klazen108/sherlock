@@ -1,5 +1,8 @@
 import type { NextRequest } from 'next/server';
-import { getDb2Connection, type Db2Connection } from '@/lib/db2';
+import { Db2ConfigError, getDb2Connection, type Db2Connection } from '@/lib/db2';
+import { requireCredentials } from '@/lib/api-credentials';
+
+export const runtime = 'nodejs';
 
 type QueryPayload = {
   query?: unknown;
@@ -36,6 +39,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   let abortHandler: (() => void) | null = null;
 
   try {
+    const credentialResult = requireCredentials(request);
+    if ('response' in credentialResult) {
+      return credentialResult.response;
+    }
+    const { credentials } = credentialResult;
+
     const body: QueryPayload = await request.json();
     if (typeof body.query !== 'string' || body.query.trim().length === 0) {
       return new Response('`query` must be a non-empty string.', { status: 400 });
@@ -44,7 +53,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const params = normalizeParams(body.params);
     const fetchSize = normalizeFetchSize(body.fetchSize);
 
-    connection = await getDb2Connection();
+    connection = await getDb2Connection(credentials);
 
     const nodeStream = fetchSize
       ? connection.queryStream(body.query, params, { fetchSize })
@@ -126,6 +135,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         // Connection released due to error.
       });
       connection = null;
+    }
+    if (error instanceof Db2ConfigError) {
+      return new Response(error.message, { status: 500 });
     }
     const message = error instanceof Error ? error.message : 'Unexpected error while executing query.';
     const status = error instanceof Error && error.message.includes('must be') ? 400 : 500;

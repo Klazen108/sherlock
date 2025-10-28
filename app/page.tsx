@@ -1,17 +1,14 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import Editor from 'react-simple-code-editor';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
+import { AppNav } from '@/components/AppNav';
+import { CredentialsModal } from '@/components/CredentialsModal';
+import { useDb2Credentials } from './hooks/useDb2Credentials';
 
 SyntaxHighlighter.registerLanguage('sql', sql);
 
@@ -43,6 +40,21 @@ export default function Home() {
   const [columns, setColumns] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const {
+    hasCredentials,
+    credentialsModalOpen,
+    initializingCredentials,
+    credentialsSubmitting,
+    credentialsError,
+    usernameInput,
+    passwordInput,
+    openCredentialsModal,
+    closeCredentialsModal,
+    setUsernameInput,
+    setPasswordInput,
+    submitCredentials,
+    clearCredentials,
+  } = useDb2Credentials();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -111,12 +123,31 @@ export default function Home() {
     pointerIdRef.current = event.pointerId;
   }, []);
 
+  const handleOpenCredentialsModal = useCallback(() => {
+    openCredentialsModal();
+  }, [openCredentialsModal]);
+
+  const handleCredentialsCancel = useCallback(() => {
+    if (hasCredentials) {
+      closeCredentialsModal();
+    }
+  }, [closeCredentialsModal, hasCredentials]);
+
   const abortActiveQuery = useCallback(() => {
     if (controllerRef.current) {
       controllerRef.current.abort();
       controllerRef.current = null;
     }
   }, []);
+
+  const handleClearCredentials = useCallback(async () => {
+    await clearCredentials();
+    abortActiveQuery();
+    setIsRunning(false);
+    setRows([]);
+    setColumns([]);
+    setError(null);
+  }, [abortActiveQuery, clearCredentials]);
 
   const processRow = useCallback((line: string) => {
     if (!line) {
@@ -150,6 +181,12 @@ export default function Home() {
       return;
     }
 
+    if (!hasCredentials) {
+      setError('Please enter your DB2 credentials before running a query.');
+      openCredentialsModal('Please enter your DB2 credentials before running a query.');
+      return;
+    }
+
     abortActiveQuery();
     setRows([]);
     setColumns([]);
@@ -167,7 +204,16 @@ export default function Home() {
         },
         body: JSON.stringify({ query }),
         signal: controller.signal,
+        credentials: 'include',
       });
+
+      if (response.status === 401) {
+        const message = await response.text();
+        await clearCredentials();
+        openCredentialsModal(message || 'Credentials are required to run queries.');
+        setError(message || 'Credentials are required to run queries.');
+        return;
+      }
 
       if (!response.ok) {
         const message = await response.text();
@@ -213,7 +259,7 @@ export default function Home() {
       controllerRef.current = null;
       setIsRunning(false);
     }
-  }, [abortActiveQuery, processRow, query]);
+  }, [abortActiveQuery, hasCredentials, processRow, query]);
 
   useEffect(() => {
     return () => {
@@ -224,10 +270,33 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-900/70 px-6 py-4">
-        <h1 className="text-lg font-semibold leading-tight text-slate-100">DB2 Query Console</h1>
-        <p className="text-sm text-slate-400">
-          Compose SQL, run it against IBM DB2 for z/OS, and stream the results as they arrive.
-        </p>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-lg font-semibold leading-tight text-slate-100">DB2 Query Console</h1>
+            <p className="text-sm text-slate-400">
+              Compose SQL, run it against IBM DB2 for z/OS, and stream the results as they arrive.
+            </p>
+          </div>
+          <AppNav />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleOpenCredentialsModal}
+            className="rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
+          >
+            {hasCredentials ? 'Update Credentials' : 'Enter Credentials'}
+          </button>
+          {hasCredentials && (
+            <button
+              type="button"
+              onClick={handleClearCredentials}
+              className="rounded-md border border-rose-600/70 px-3 py-1.5 text-sm font-medium text-rose-300 transition hover:border-rose-500 hover:text-rose-200"
+            >
+              Clear Credentials
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="flex flex-1 flex-col overflow-hidden">
@@ -352,6 +421,20 @@ export default function Home() {
           </section>
         </div>
       </main>
+      <CredentialsModal
+        open={credentialsModalOpen}
+        initializing={initializingCredentials}
+        hasCredentials={hasCredentials}
+        username={usernameInput}
+        password={passwordInput}
+        error={credentialsError}
+        submitting={credentialsSubmitting}
+        onUsernameChange={setUsernameInput}
+        onPasswordChange={setPasswordInput}
+        onSubmit={submitCredentials}
+        onCancel={handleCredentialsCancel}
+        onClear={handleClearCredentials}
+      />
     </div>
   );
 }
